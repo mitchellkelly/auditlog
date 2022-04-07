@@ -269,7 +269,34 @@ func EventsAddHandler(db *mongo.Collection, schema *jsonschema.Schema) http.Hand
 
 func EventsQueryHandler(db *mongo.Collection) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		// TODO
+		// create a filter object
+		// we have to call make() because the collection.Find method assumes filter will be non nil
+		var filter = make(map[string]interface{})
+
+		// create a timed context to use when making requests to the db
+		var timedContext, timedContextCancel = context.WithTimeout(context.Background(), 10*time.Second)
+
+		// execute a find command against the db
+		// this will return a cursor that we can request values from
+		var cursor, err = db.Find(timedContext, filter, nil)
+		// close the context to release any resources associated with it
+		timedContextCancel()
+
+		// results will be all of the events in the db that match the filter
+		// if no filter is provided the all of the results will be returned
+		// we set results to an intially empty list so that if the db returns 0 values
+		// the endpoint will give the user an empty array instead of the nil json object
+		var results = make([]map[string]interface{}, 0)
+		if err == nil {
+			// curse through all of the results and add them to the results list
+			err = cursor.All(context.Background(), &results)
+		}
+
+		if err == nil {
+			WriteJsonResponse(writer, results)
+		} else {
+			WriteJsonResponse(writer, err)
+		}
 	})
 }
 
