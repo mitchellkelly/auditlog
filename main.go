@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/qri-io/jsonschema"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -272,6 +273,37 @@ func EventsQueryHandler(db *mongo.Collection) http.Handler {
 		// create a filter object
 		// we have to call make() because the collection.Find method assumes filter will be non nil
 		var filter = make(map[string]interface{})
+
+		// get the query params so we can create a filter from them
+		var queryParams = request.URL.Query()
+		for k, _ := range queryParams {
+			var v interface{}
+
+			// queryParams is a url.Values type which is map[string][]string
+			// we want url.Values map key but we will call the url.Values.Get(k) method
+			// since it returns a string
+			var queryValueString = queryParams.Get(k)
+
+			// handle id values as a special case
+			// we want to query for a 24 character hex id
+			// but mongo assumes we are using the 12 byte format
+			if k == "_id" {
+				var objectId, _ = primitive.ObjectIDFromHex(queryValueString)
+				v = objectId
+			} else {
+				v = queryValueString
+			}
+
+			// trying to pass a string filter value for a non string data type results in no match
+			// i.e. trying to filter for timestamp == "1648857887" will not match a row where timestamp == 1648857887
+			// TODO allow for filtering of values other than strings
+			// this could be done by using the jsonschema, checking the object type
+			// and parsing it appropriately before adding it to the filter
+
+			filter[k] = v
+		}
+
+		// TODO allow the user to sort the response by providing a sort=<field> value in the query params
 
 		// create a timed context to use when making requests to the db
 		var timedContext, timedContextCancel = context.WithTimeout(context.Background(), 10*time.Second)
