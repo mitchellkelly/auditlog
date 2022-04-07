@@ -8,6 +8,25 @@ import (
 	"os"
 )
 
+// logging middleware to log each time there is a new request
+type LoggingMiddleware struct {
+	Logger *log.Logger
+	Handler http.Handler
+}
+
+// log that a new request was made then call the next http handler
+func (self LoggingMiddleware) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	self.Logger.Println("New Request")
+
+	// TODO ideally we would wrap the response writer so we can read
+	// the response before it gets sent back to the user
+	// this would allow us to swap 500 level error descriptions for default 500 level errors
+	// so that no sensitive info gets sent to the user
+	// we could also log the descriptive 500 level error at this time
+
+	self.Handler.ServeHTTP(writer, request)
+}
+
 func main() {
 	// set the logger to log messages in UTC time
 	log.SetFlags(log.LstdFlags | log.LUTC)
@@ -54,9 +73,15 @@ func main() {
 	// the http handler that will be used to serve http requests
 	var serveHandler http.Handler = mux
 
+	// wrap the multiplexer in a middleware handler that logs when reqests are made
+	serveHandler = LoggingMiddleware{
+		Logger: log.Default(),
+		Handler: serveHandler,
+	}
+
 	// create an http server for serving requests using the wrapped multiplexer we created
 	var server = http.Server{
-		Addr:    fmt.Sprintf(":%d", serverPort),
+		Addr: fmt.Sprintf(":%d", serverPort),
 		Handler: serveHandler,
 	}
 
