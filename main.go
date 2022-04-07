@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,8 +10,11 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"time"
 
 	"github.com/qri-io/jsonschema"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type HttpError struct {
@@ -184,13 +188,13 @@ func (self MethodRouter) ServeHTTP(writer http.ResponseWriter, request *http.Req
 	}
 }
 
-func EventsAddHandler(schema jsonschema.Schema) http.Handler {
+func EventsAddHandler(db *mongo.Collection, schema *jsonschema.Schema) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		// TODO
 	})
 }
 
-func EventsQueryHandler() http.Handler {
+func EventsQueryHandler(db *mongo.Collection) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		// TODO
 	})
@@ -247,6 +251,27 @@ func main() {
 		log.Fatalf("A path to a json schema file for audit log events was not provided. Please provide on using the AUDIT_LOG_EVENT_SCHEMA_FILE environment variable")
 	}
 
+	var dbCredString string
+	// get the db username and password from env variable
+	var dbUsername = os.Getenv("AUDIT_LOG_DB_USERNAME")
+	var dbPassword = os.Getenv("AUDIT_LOG_DB_PASSWORD")
+	// if either vaule is empty then we will leave the credential string empty
+	if len(dbUsername) != 0 && len(dbPassword) != 0 {
+		dbCredString = fmt.Sprintf("%s@%s", dbUsername, dbPassword)
+	}
+	var dbHost = os.Getenv("AUDIT_LOG_DB_HOST")
+	// get the db port from env variable
+	// setting it to localhost if it is not provided
+	if len(dbHost) == 0 {
+		dbHost = "localhost"
+	}
+	// get the db port from env variable
+	// setting it to the mongo default if it is not provided
+	var dbPort = os.Getenv("AUDIT_LOG_DB_PORT")
+	if dbPort == "" {
+		dbPort = "27017"
+	}
+
 	var startupError error
 
 	// open the json schema file for reading
@@ -264,15 +289,42 @@ func main() {
 		log.Fatalf("An error occured while parsing the audit log event json schema file: %s", startupError)
 	}
 
+	// create an options object to use to supply options when creating the db
+	var dbConnectionString = fmt.Sprintf("mongodb://%s%s:%s", dbCredString, dbHost, dbPort)
+	var dbClientOptions = options.Client().ApplyURI(dbConnectionString)
+
+	// create a timed context to use when making requests to the db
+	var timedContext, timedContextCancel = context.WithTimeout(context.Background(), 10*time.Second)
+
+	var dbClient *mongo.Client
+	// connect to db
+	dbClient, startupError = mongo.Connect(timedContext, dbClientOptions)
+	if startupError != nil {
+		log.Fatalf("An error occured while connecting to the database: %s", startupError)
+	}
+	// cancel the timed context to release any resources associated with it
+	timedContextCancel()
+
+	// create a new timed context to use to test the db connection
+	timedContext, timedContextCancel = context.WithTimeout(context.Background(), 10*time.Second)
+	// test the db connection
+	startupError = dbClient.Ping(timedContext, nil)
+	if startupError != nil {
+		log.Fatalf("An error occured while verifying the connection to the database: %s", startupError)
+	}
+
+	// connect to the 'auditlog' db 'event' collection
+	var dbCollection = dbClient.Database("auditlog").Collection("event")
+
 	// create a new http multiplexer for handling http requests
 	var mux = http.NewServeMux()
 
 	// create a new method router so we can group similar operations for events to one endpoint path
 	var eventsRouter = NewMethodRouter()
 	// add the ability to ADD events to the event router
-	eventsRouter.Handle(http.MethodPost, EventsAddHandler(eventJsonSchema))
+	eventsRouter.Handle(http.MethodPost, EventsAddHandler(dbCollection, &eventJsonSchema))
 	// add the ability to QUERY events to the event router
-	eventsRouter.Handle(http.MethodGet, EventsQueryHandler())
+	eventsRouter.Handle(http.MethodGet, EventsQueryHandler(dbCollection))
 
 	// add the audit log events router to the multiplexer
 	mux.Handle("/events", eventsRouter)
