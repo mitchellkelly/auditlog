@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -190,7 +191,79 @@ func (self MethodRouter) ServeHTTP(writer http.ResponseWriter, request *http.Req
 
 func EventsAddHandler(db *mongo.Collection, schema *jsonschema.Schema) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		// TODO
+		// read the data from the request body
+		var d, err = ioutil.ReadAll(request.Body)
+		if err != nil {
+			err = DefaultHttpError(http.StatusBadRequest)
+		}
+
+		// validation errors are any errors that were raised during the json validation
+		var validationErrors []jsonschema.KeyError
+		// validate the request data using the event json schema
+		if err == nil {
+			validationErrors, err = schema.ValidateBytes(context.Background(), d)
+			if err != nil {
+				err = DefaultHttpError(http.StatusBadRequest)
+			}
+		}
+
+		if err == nil {
+			// all of the validation error strings concatenated to send back to the user
+			var validationErrorString string
+			// one instance of a validation error string used to build the concatenated string
+			var veString string
+
+			// use the regex package for replacing quotes so that we dont have to
+			// import "strings" just for one function
+			var quoteReplaceRegex = regexp.MustCompile("\"")
+
+			for _, ve := range validationErrors {
+				// replace all instances of " with ' so that we can send the data
+				// back to the user in a string without it having a lot of escaped characters
+				veString = string(quoteReplaceRegex.ReplaceAll([]byte(ve.Message), []byte{'\''}))
+				// the PropertyPath is not always set or can be just /
+				// if PropertyPath is a good value then we want to add it to the error string
+				if len(ve.PropertyPath) != 0 && ve.PropertyPath != "/" {
+					veString = fmt.Sprintf("%s %s", ve.PropertyPath, veString)
+				}
+
+				if len(validationErrorString) == 0 {
+					// if the error string hasnt been set up yet the we want to
+					// add a summary to the beginning
+					validationErrorString = fmt.Sprintf("The request json body did not match the expected format: %s", veString)
+				} else {
+					// if the error string has been set up then we just want to add the next error on
+					validationErrorString = fmt.Sprintf("%s; %s", validationErrorString, veString)
+				}
+			}
+
+			if len(validationErrorString) != 0 {
+				err = HttpError{
+					Code:        http.StatusBadRequest,
+					Description: validationErrorString,
+				}
+			}
+		}
+
+		var event map[string]interface{}
+		if err == nil {
+			err = json.Unmarshal(d, &event)
+		}
+
+		if err == nil {
+			// create a timed context to use when making requests to the db
+			var timedContext, timedContextCancel = context.WithTimeout(context.Background(), 10*time.Second)
+
+			_, err = db.InsertOne(timedContext, event)
+			// close the context to release any resources associated with it
+			timedContextCancel()
+		}
+
+		if err == nil {
+			WriteJsonResponse(writer, nil)
+		} else {
+			WriteJsonResponse(writer, err)
+		}
 	})
 }
 
