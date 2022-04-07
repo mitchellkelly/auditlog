@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -8,6 +9,71 @@ import (
 	"os"
 	"regexp"
 )
+
+type HttpError struct {
+	Code        int    `json:"-"`
+	Description string `json:"description"`
+}
+
+func (self HttpError) Error() string {
+	return self.Description
+}
+
+func DefaultHttpError(statusCode int) HttpError {
+	return HttpError{
+		Code:        statusCode,
+		Description: http.StatusText(statusCode),
+	}
+}
+
+func WriteJsonResponse(writer http.ResponseWriter, v interface{}) {
+	var statusCode int
+	var responseBytes []byte
+
+	if v != nil {
+		// check the type of v to determine if it is an error
+		var e, ok = v.(error)
+
+		if ok {
+			// narrow the error down further to determine if it is an HttpError
+			httpErr, ok := e.(HttpError)
+			// if the error was not an http error then we have an internal server error
+			if !ok {
+				v = e.Error()
+
+				statusCode = 500
+			} else {
+				statusCode = httpErr.Code
+			}
+		}
+
+		var err error
+		// marshal the response object into json so we can send it to the user
+		responseBytes, err = json.Marshal(v)
+
+		// if marshaling the json was successful then we will return the user provided status code if one was set
+		// or a 200 if nothing was set by the user
+		// if an error occured while marshaling the object to json then we will return a plain 500 error
+		if err == nil {
+			if statusCode == 0 {
+				statusCode = http.StatusOK
+			}
+		} else {
+			statusCode = http.StatusInternalServerError
+			responseBytes = []byte(fmt.Sprintf(`{"description": "%s"}`, http.StatusText(statusCode)))
+		}
+	} else {
+		// if v is nil then the user does not want to write anything
+		// just return a 204 and an empty json body
+		statusCode = http.StatusNoContent
+		responseBytes = []byte("{}")
+	}
+
+	writer.Header().Set("Content-Type", "application/json")
+	writer.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBytes)))
+	writer.WriteHeader(statusCode)
+	writer.Write(responseBytes)
+}
 
 // TODO the custom http mux code (middlewares and routers) could be replaced
 // with a more sophisticated mux package (i prefer github.com/gorilla/mux)
@@ -56,10 +122,9 @@ func (self AuthenticationMiddleware) ServeHTTP(writer http.ResponseWriter, reque
 	if userToken == self.Token {
 		self.Handler.ServeHTTP(writer, request)
 	} else {
-		var statusCode = http.StatusUnauthorized
+		var err = DefaultHttpError(http.StatusUnauthorized)
 
-		writer.WriteHeader(statusCode)
-		writer.Write([]byte(http.StatusText(statusCode)))
+		WriteJsonResponse(writer, err)
 	}
 }
 
@@ -110,10 +175,9 @@ func (self MethodRouter) ServeHTTP(writer http.ResponseWriter, request *http.Req
 	if routeIsRegistered {
 		handler.ServeHTTP(writer, request)
 	} else {
-		var statusCode = http.StatusMethodNotAllowed
+		var err = DefaultHttpError(http.StatusMethodNotAllowed)
 
-		writer.WriteHeader(statusCode)
-		writer.Write([]byte(http.StatusText(statusCode)))
+		WriteJsonResponse(writer, err)
 	}
 }
 
