@@ -77,6 +77,41 @@ func (self LoggingMiddleware) ServeHTTP(writer http.ResponseWriter, request *htt
 	self.Handler.ServeHTTP(writer, request)
 }
 
+// http handler router that can be used to register (and dispatch to) handlers for specific http methods
+type MethodRouter struct {
+	routes map[string]http.Handler
+}
+
+func NewMethodRouter() MethodRouter {
+	var routes = make(map[string]http.Handler)
+
+	return MethodRouter{
+		routes: routes,
+	}
+}
+
+func (self MethodRouter) Handle(method string, handler http.Handler) {
+	if len(method) > 0 {
+		self.routes[method] = handler
+	}
+}
+
+func (self MethodRouter) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	var handler, routeIsRegistered = self.routes[request.Method]
+
+	// if a handler has been registered for the requested method then we will
+	// dispatch to that specific handler
+	// if the method has NOT been registered then we will respond with a 405 Method Not Allowed
+	if routeIsRegistered {
+		handler.ServeHTTP(writer, request)
+	} else {
+		var statusCode = http.StatusMethodNotAllowed
+
+		writer.WriteHeader(statusCode)
+		writer.Write([]byte(http.StatusText(statusCode)))
+	}
+}
+
 func main() {
 	// set the logger to log messages in UTC time
 	log.SetFlags(log.LstdFlags | log.LUTC)
@@ -125,6 +160,12 @@ func main() {
 
 	// create a new http multiplexer for handling http requests
 	var mux = http.NewServeMux()
+
+	// create a new method router so we can group similar operations for events to one endpoint path
+	var eventsRouter = NewMethodRouter()
+
+	// add the audit log events router to the multiplexer
+	mux.Handle("/events", eventsRouter)
 
 	// the http handler that will be used to serve http requests
 	var serveHandler http.Handler = mux
