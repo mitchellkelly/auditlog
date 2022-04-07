@@ -6,11 +6,61 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 )
+
+// http handler that authenticates a request and calls another http handler
+// if authentication is successful
+type AuthenticationMiddleware struct {
+	// token to use when authenticating requests
+	Token string
+	// http handler to call if authentication succeeds
+	Handler http.Handler
+}
+
+// authenticate a request and call the wrapped handler if authentication is successful
+// if an empty authentication token was provided then we will not do any authenticaion
+func (self AuthenticationMiddleware) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	// token value provided by the user that we want to authenticate
+	// this value is provided as a bearer token in the http request header
+	var userToken string
+
+	// only bother getting the user token if the authentication token was set
+	if len(self.Token) > 0 {
+		// regular expression for matching a bearer token
+		var tokenRegex = regexp.MustCompile("[Bb]earer (.*)")
+
+		// get the authentication value the user provided in the http request
+		var authValue = request.Header.Get("Authorization")
+
+		// use the regular expression to check if the user token is in the format we are expecting
+		var regexMatches = tokenRegex.FindStringSubmatch(authValue)
+		// FindStringSubmatch returns a list of values on successful matching
+		// value 0 will be the whole string passed in
+		// subsequent values will be capture group values
+		if len(regexMatches) > 0 {
+			// since we provided a capture group in the token regex
+			// and we know that the regex matched something
+			// we know that regexMatches[1] is our matched token
+			userToken = regexMatches[1]
+		}
+	}
+
+	// if authentication was successful then call the next http handler
+	// if authentication was not successful then send back a 401 response
+	if userToken == self.Token {
+		self.Handler.ServeHTTP(writer, request)
+	} else {
+		var statusCode = http.StatusUnauthorized
+
+		writer.WriteHeader(statusCode)
+		writer.Write([]byte(http.StatusText(statusCode)))
+	}
+}
 
 // logging middleware to log each time there is a new request
 type LoggingMiddleware struct {
-	Logger *log.Logger
+	Logger  *log.Logger
 	Handler http.Handler
 }
 
@@ -36,9 +86,15 @@ func main() {
 	// variables that will be set to values supplied by the user via the command line
 	var serverPort int
 	var shouldServeTls bool
+	var apiToken string
 
 	flag.IntVar(&serverPort, "p", 80, "The TCP port for the server to listen on")
 	flag.BoolVar(&shouldServeTls, "t", false, "Handle requests using TLS encryption")
+
+	// TODO change this to a more sophisticated authentication method
+	// ideally each user will have their own token so that access can be controlled more easily
+	// NOTICE: an empty token means no authentication will be done
+	flag.StringVar(&apiToken, "api-token", "", "Unique value used to authenticate users")
 
 	// parse the command line args for flag values
 	flag.Parse()
@@ -75,13 +131,19 @@ func main() {
 
 	// wrap the multiplexer in a middleware handler that logs when reqests are made
 	serveHandler = LoggingMiddleware{
-		Logger: log.Default(),
+		Logger:  log.Default(),
+		Handler: serveHandler,
+	}
+
+	// wrap the multiplexer in a middleware handler that authenticates requests
+	serveHandler = AuthenticationMiddleware{
+		Token:   apiToken,
 		Handler: serveHandler,
 	}
 
 	// create an http server for serving requests using the wrapped multiplexer we created
 	var server = http.Server{
-		Addr: fmt.Sprintf(":%d", serverPort),
+		Addr:    fmt.Sprintf(":%d", serverPort),
 		Handler: serveHandler,
 	}
 
