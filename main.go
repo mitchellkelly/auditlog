@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"regexp"
+
+	"github.com/qri-io/jsonschema"
 )
 
 type HttpError struct {
@@ -181,7 +184,7 @@ func (self MethodRouter) ServeHTTP(writer http.ResponseWriter, request *http.Req
 	}
 }
 
-func EventsAddHandler() http.Handler {
+func EventsAddHandler(schema jsonschema.Schema) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		// TODO
 	})
@@ -239,13 +242,35 @@ func main() {
 		tlsKey = os.Getenv("AUDIT_LOG_TLS_KEY")
 	}
 
+	var schemaFilePath = os.Getenv("AUDIT_LOG_EVENT_SCHEMA_FILE")
+	if len(schemaFilePath) == 0 {
+		log.Fatalf("A path to a json schema file for audit log events was not provided. Please provide on using the AUDIT_LOG_EVENT_SCHEMA_FILE environment variable")
+	}
+
+	var startupError error
+
+	// open the json schema file for reading
+	var fileReader io.Reader
+	fileReader, startupError = os.Open(schemaFilePath)
+	if startupError != nil {
+		log.Fatalf("An error occured while reading the audit log event json schema file: %s", startupError)
+	}
+
+	// create a json schema object that will be used to validate event format
+	var eventJsonSchema jsonschema.Schema
+	// read the json schema into the schema object
+	startupError = json.NewDecoder(fileReader).Decode(&eventJsonSchema)
+	if startupError != nil {
+		log.Fatalf("An error occured while parsing the audit log event json schema file: %s", startupError)
+	}
+
 	// create a new http multiplexer for handling http requests
 	var mux = http.NewServeMux()
 
 	// create a new method router so we can group similar operations for events to one endpoint path
 	var eventsRouter = NewMethodRouter()
 	// add the ability to ADD events to the event router
-	eventsRouter.Handle(http.MethodPost, EventsAddHandler())
+	eventsRouter.Handle(http.MethodPost, EventsAddHandler(eventJsonSchema))
 	// add the ability to QUERY events to the event router
 	eventsRouter.Handle(http.MethodGet, EventsQueryHandler())
 

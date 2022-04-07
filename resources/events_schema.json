@@ -1,0 +1,35 @@
+{
+	"definitions": {},
+	"$schema": "https://json-schema.org/draft-07/schema",
+	"$id": "auditlog.event",
+	"title": "Event data from various systems",
+	"type": "object",
+	"required": [
+		"timestamp",
+		"summary",
+		"source",
+		"attributes"
+	],
+	"properties": {
+		"timestamp": {
+			"title": "Nanoseconds since the Unix epoch",
+			"type": "number",
+			"minimum": 0
+		},
+		"summary": {
+			"title": "Simple summary describing the event",
+			"type": "string",
+			"minLength": 1
+		},
+		"source": {
+			"title": "Information describing the system that created the event",
+			"type": "object",
+		    "additionalProperties": true
+		},
+		"attributes": {
+			"title": "Additional information about the event",
+			"type": "object",
+		    "additionalProperties": true
+		}
+	}
+}
