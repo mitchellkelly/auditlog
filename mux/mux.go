@@ -21,7 +21,9 @@ func WriteJsonResponse(writer http.ResponseWriter, v interface{}) {
 			httpErr, ok := e.(HttpError)
 			// if the error was not an http error then we have an internal server error
 			if !ok {
-				v = e.Error()
+				v = HttpError{
+					Description: e.Error(),
+				}
 
 				statusCode = 500
 			} else {
@@ -42,13 +44,12 @@ func WriteJsonResponse(writer http.ResponseWriter, v interface{}) {
 			}
 		} else {
 			statusCode = http.StatusInternalServerError
-			responseBytes = []byte(fmt.Sprintf(`{"description": "%s"}`, http.StatusText(statusCode)))
+			responseBytes = []byte(fmt.Sprintf(`{"description":"%s"}`, http.StatusText(statusCode)))
 		}
 	} else {
 		// if v is nil then the user does not want to write anything
 		// just return a 204 and an empty json body
 		statusCode = http.StatusNoContent
-		responseBytes = []byte("{}")
 	}
 
 	writer.Header().Set("Content-Type", "application/json")
