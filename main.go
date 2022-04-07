@@ -9,6 +9,11 @@ import (
 	"regexp"
 )
 
+// TODO the custom http mux code (middlewares and routers) could be replaced
+// with a more sophisticated mux package (i prefer github.com/gorilla/mux)
+// the custom code is used here so that this service can mostly use features
+// already available in Go
+
 // http handler that authenticates a request and calls another http handler
 // if authentication is successful
 type AuthenticationMiddleware struct {
@@ -112,6 +117,18 @@ func (self MethodRouter) ServeHTTP(writer http.ResponseWriter, request *http.Req
 	}
 }
 
+func EventsAddHandler() http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		// TODO
+	})
+}
+
+func EventsQueryHandler() http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		// TODO
+	})
+}
+
 func main() {
 	// set the logger to log messages in UTC time
 	log.SetFlags(log.LstdFlags | log.LUTC)
@@ -163,9 +180,15 @@ func main() {
 
 	// create a new method router so we can group similar operations for events to one endpoint path
 	var eventsRouter = NewMethodRouter()
+	// add the ability to ADD events to the event router
+	eventsRouter.Handle(http.MethodPost, EventsAddHandler())
+	// add the ability to QUERY events to the event router
+	eventsRouter.Handle(http.MethodGet, EventsQueryHandler())
 
 	// add the audit log events router to the multiplexer
 	mux.Handle("/events", eventsRouter)
+
+	// TODO probably need GET PUT DELETE /events/<event>
 
 	// the http handler that will be used to serve http requests
 	var serveHandler http.Handler = mux
