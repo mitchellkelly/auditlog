@@ -1,0 +1,13 @@
+version: "3"
+services:
+  auditlog:
+    image: "mitchellkelly/auditlog"
+    ports: ["8080:80"]
+    environment:
+      - AUDIT_LOG_DB_HOST=mongo-db
+      - AUDIT_LOG_API_TOKEN
+    depends_on:
+      mongo-db:
+        condition: service_started
+  mongo-db:
+    image: mongo
