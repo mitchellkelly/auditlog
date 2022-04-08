@@ -175,15 +175,9 @@ func main() {
 	// variables that will be set to values supplied by the user via the command line
 	var serverPort int
 	var shouldServeTls bool
-	var apiToken string
 
 	flag.IntVar(&serverPort, "p", 80, "The TCP port for the server to listen on")
 	flag.BoolVar(&shouldServeTls, "t", false, "Handle requests using TLS encryption")
-
-	// TODO change this to a more sophisticated authentication method
-	// ideally each user will have their own token so that access can be controlled more easily
-	// NOTICE: an empty token means no authentication will be done
-	flag.StringVar(&apiToken, "api-token", "", "Unique value used to authenticate users")
 
 	// parse the command line args for flag values
 	flag.Parse()
@@ -211,6 +205,11 @@ func main() {
 		tlsCert = os.Getenv("AUDIT_LOG_TLS_CERT")
 		tlsKey = os.Getenv("AUDIT_LOG_TLS_KEY")
 	}
+
+	// TODO change this to a more sophisticated authentication method
+	// ideally each user will have their own token so that access can be controlled more easily
+	// NOTICE: an empty token means no authentication will be done
+	var apiToken = os.Getenv("AUDIT_LOG_API_TOKEN")
 
 	var schemaFilePath = os.Getenv("AUDIT_LOG_EVENT_SCHEMA_FILE")
 	if len(schemaFilePath) == 0 {
@@ -296,6 +295,7 @@ func main() {
 	muliplexer.Handle("/events", eventsRouter)
 
 	// TODO probably need GET PUT DELETE /events/<event>
+	// TODO probably need GET /health
 
 	// the http handler that will be used to serve http requests
 	var serveHandler http.Handler = muliplexer
