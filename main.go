@@ -24,6 +24,43 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+type ValidationError []jsonschema.KeyError
+
+// create a string representation of the json schema errors
+func (self ValidationError) Error() string {
+	// string representation of all of the validation errors
+	var validationErrorString string
+	// one instance of a validation error string used to build the concatenated string
+	var veString string
+
+	// build a regular expression we can use to match / replace double quotes
+	var quoteReplaceRegex = regexp.MustCompile("\"")
+
+	for _, ve := range self {
+		// validation errors occasionally use double quotes in their string values
+		// we want to replace all instances of double quotes " with single quotes ' so that we can send the data
+		// back to the user in a json string without it having a lot of escaped characters
+		veString = string(quoteReplaceRegex.ReplaceAll([]byte(ve.Message), []byte{'\''}))
+		// the PropertyPath is not always set or can be just /
+		// if PropertyPath is a good value then we want to add it to the error string
+		if len(ve.PropertyPath) != 0 && ve.PropertyPath != "/" {
+			veString = fmt.Sprintf("%s %s", ve.PropertyPath, veString)
+		}
+
+		if len(validationErrorString) == 0 {
+			// if the error string hasnt been set up yet the we want to
+			// add a summary to the beginning
+			validationErrorString = fmt.Sprintf("The json did not match the expected format: %s", veString)
+		} else {
+			// if the error string has been set up then we just want to add the next error on
+			validationErrorString = fmt.Sprintf("%s; %s", validationErrorString, veString)
+		}
+	}
+
+	return validationErrorString
+}
+
+// EventsAddHandler creates an http handler that validates and adds events to the database
 func EventsAddHandler(db *mongo.Collection, schema *jsonschema.Schema) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		// read the data from the request body
@@ -32,50 +69,20 @@ func EventsAddHandler(db *mongo.Collection, schema *jsonschema.Schema) http.Hand
 			err = mux.DefaultHttpError(http.StatusBadRequest)
 		}
 
-		// validation errors are any errors that were raised during the json validation
-		var validationErrors []jsonschema.KeyError
-		// validate the request data using the event json schema
 		if err == nil {
-			validationErrors, err = schema.ValidateBytes(context.Background(), d)
+			var validationError ValidationError
+			// validate the request data using the json schema
+			validationError, err = schema.ValidateBytes(context.Background(), d)
+			// if something unexpected happened while validating the json we will just return a
+			// simple 400 error
+			// if the json body is invalid then we will return a 400 and a response body
+			// describing why the json is invalid
 			if err != nil {
 				err = mux.DefaultHttpError(http.StatusBadRequest)
-			}
-		}
-
-		if err == nil {
-			// all of the validation error strings concatenated to send back to the user
-			var validationErrorString string
-			// one instance of a validation error string used to build the concatenated string
-			var veString string
-
-			// use the regex package for replacing quotes so that we dont have to
-			// import "strings" just for one function
-			var quoteReplaceRegex = regexp.MustCompile("\"")
-
-			for _, ve := range validationErrors {
-				// replace all instances of " with ' so that we can send the data
-				// back to the user in a string without it having a lot of escaped characters
-				veString = string(quoteReplaceRegex.ReplaceAll([]byte(ve.Message), []byte{'\''}))
-				// the PropertyPath is not always set or can be just /
-				// if PropertyPath is a good value then we want to add it to the error string
-				if len(ve.PropertyPath) != 0 && ve.PropertyPath != "/" {
-					veString = fmt.Sprintf("%s %s", ve.PropertyPath, veString)
-				}
-
-				if len(validationErrorString) == 0 {
-					// if the error string hasnt been set up yet the we want to
-					// add a summary to the beginning
-					validationErrorString = fmt.Sprintf("The request json body did not match the expected format: %s", veString)
-				} else {
-					// if the error string has been set up then we just want to add the next error on
-					validationErrorString = fmt.Sprintf("%s; %s", validationErrorString, veString)
-				}
-			}
-
-			if len(validationErrorString) != 0 {
+			} else {
 				err = mux.HttpError{
 					Code:        http.StatusBadRequest,
-					Description: validationErrorString,
+					Description: validationError.Error(),
 				}
 			}
 		}
@@ -94,14 +101,12 @@ func EventsAddHandler(db *mongo.Collection, schema *jsonschema.Schema) http.Hand
 			timedContextCancel()
 		}
 
-		if err == nil {
-			mux.WriteJsonResponse(writer, nil)
-		} else {
-			mux.WriteJsonResponse(writer, err)
-		}
+		mux.WriteJsonResponse(writer, err)
 	})
 }
 
+// EventsQueryHandler creates an http handler that retrieves values from the database
+// optionally allowing to filter the vaules
 func EventsQueryHandler(db *mongo.Collection) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		// create a filter object
