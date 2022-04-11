@@ -8,6 +8,13 @@ import (
 	"regexp"
 )
 
+// WriteJsonResponse is a generic way of writing an http response with a json body
+// the function determines what http status code to write based on the type of v
+// if v is nil then the status code will be 204
+// if v is an error the status code will either be HttpError.Code
+// of a 500 if the the error is not of type HttpError
+// if v is any non error value the function will attempt to marshal it to json
+// and send a 200 and the json body to the user
 func WriteJsonResponse(writer http.ResponseWriter, v interface{}) {
 	var statusCode int
 	var responseBytes []byte
@@ -35,9 +42,9 @@ func WriteJsonResponse(writer http.ResponseWriter, v interface{}) {
 		// marshal the response object into json so we can send it to the user
 		responseBytes, err = json.Marshal(v)
 
-		// if marshaling the json was successful then we will return the user provided status code if one was set
+		// if marshaling the json was successful then we will send the user provided status code if one was set
 		// or a 200 if nothing was set by the user
-		// if an error occured while marshaling the object to json then we will return a plain 500 error
+		// if an error occured while marshaling the object to json then we will send a plain 500 error
 		if err == nil {
 			if statusCode == 0 {
 				statusCode = http.StatusOK
@@ -48,8 +55,9 @@ func WriteJsonResponse(writer http.ResponseWriter, v interface{}) {
 		}
 	} else {
 		// if v is nil then the user does not want to write anything
-		// just return a 204 and an empty json body
+		// just send a 204 and an empty json object
 		statusCode = http.StatusNoContent
+		responseBytes = []byte{'{', '}'}
 	}
 
 	writer.Header().Set("Content-Type", "application/json")
@@ -69,6 +77,8 @@ type AuthenticationMiddleware struct {
 
 // authenticate a request and call the wrapped handler if authentication is successful
 // if an empty authentication token was provided then we will not do any authenticaion
+// TODO using a single api token is not a very secure authentication method
+// ideally the service would use a more dynamic authentication method like JWTs
 func (self AuthenticationMiddleware) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	// token value provided by the user that we want to authenticate
 	// this value is provided as a bearer token in the http request header
@@ -77,7 +87,7 @@ func (self AuthenticationMiddleware) ServeHTTP(writer http.ResponseWriter, reque
 	// only bother getting the user token if the authentication token was set
 	if len(self.Token) > 0 {
 		// regular expression for matching a bearer token
-		var tokenRegex = regexp.MustCompile("[Bb]earer (.*)")
+		var tokenRegex = regexp.MustCompile("^[Bb]earer (.+)$")
 
 		// get the authentication value the user provided in the http request
 		var authValue = request.Header.Get("Authorization")
@@ -130,6 +140,7 @@ type MethodRouter struct {
 	routes map[string]http.Handler
 }
 
+// create a new MethodRouter
 func NewMethodRouter() MethodRouter {
 	var routes = make(map[string]http.Handler)
 
@@ -138,12 +149,15 @@ func NewMethodRouter() MethodRouter {
 	}
 }
 
+// add an http handler for the http method provided
 func (self MethodRouter) Handle(method string, handler http.Handler) {
 	if len(method) > 0 {
 		self.routes[method] = handler
 	}
 }
 
+// serve an http request if a handler has been defined for the method the user is requesting
+// if no handler has been defined a 405 will be sent back to the user
 func (self MethodRouter) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	var handler, routeIsRegistered = self.routes[request.Method]
 
