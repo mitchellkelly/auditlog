@@ -99,15 +99,14 @@ func main() {
 	var tlsCert string
 	var tlsKey string
 
-	if shouldServeTls {
-		// set the default port to 443 if tls was requested and the server port was not explicitly set
-		if len(serverPort) == 0 {
+	// if a port was not set we will use a default port
+	if len(serverPort) == 0 {
+		// use 443 when using tls or 80 otherwise
+		if shouldServeTls {
 			serverPort = "443"
+		} else {
+			serverPort = "80"
 		}
-
-		// get the cert and key values from env variables
-		tlsCert = os.Getenv("AUDIT_LOG_TLS_CERT")
-		tlsKey = os.Getenv("AUDIT_LOG_TLS_KEY")
 	}
 
 	// TODO using a single api token is not a very secure authentication method
@@ -196,6 +195,10 @@ func main() {
 	// start the server
 	var serverError error
 	if shouldServeTls {
+		// get the cert and key values from env variables
+		tlsCert = os.Getenv("AUDIT_LOG_TLS_CERT")
+		tlsKey = os.Getenv("AUDIT_LOG_TLS_KEY")
+
 		serverError = server.ListenAndServeTLS(tlsCert, tlsKey)
 	} else {
 		serverError = server.ListenAndServe()
