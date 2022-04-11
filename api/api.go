@@ -72,9 +72,11 @@ func EventsAddHandler(db *mongo.Collection, schema *jsonschema.Schema) http.Hand
 			if err != nil {
 				err = mux.DefaultHttpError(http.StatusBadRequest)
 			} else {
-				err = mux.HttpError{
-					Code:        http.StatusBadRequest,
-					Description: validationError.Error(),
+				if len(validationError) > 0 {
+					err = mux.HttpError{
+						Code:        http.StatusBadRequest,
+						Description: validationError.Error(),
+					}
 				}
 			}
 		}
