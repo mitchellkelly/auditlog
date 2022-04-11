@@ -84,25 +84,22 @@ func (self AuthenticationMiddleware) ServeHTTP(writer http.ResponseWriter, reque
 	// this value is provided as a bearer token in the http request header
 	var userToken string
 
-	// only bother getting the user token if the authentication token was set
-	if len(self.Token) > 0 {
-		// regular expression for matching a bearer token
-		var tokenRegex = regexp.MustCompile("^[Bb]earer (.+)$")
+	// regular expression for matching a bearer token
+	var tokenRegex = regexp.MustCompile("^[Bb]earer (.+)$")
 
-		// get the authentication value the user provided in the http request
-		var authValue = request.Header.Get("Authorization")
+	// get the authentication value the user provided in the http request
+	var authValue = request.Header.Get("Authorization")
 
-		// use the regular expression to check if the user token is in the format we are expecting
-		var regexMatches = tokenRegex.FindStringSubmatch(authValue)
-		// FindStringSubmatch returns a list of values on successful matching
-		// value 0 will be the whole string passed in
-		// subsequent values will be capture group values
-		if len(regexMatches) > 0 {
-			// since we provided a capture group in the token regex
-			// and we know that the regex matched something
-			// we know that regexMatches[1] is our matched token
-			userToken = regexMatches[1]
-		}
+	// use the regular expression to check if the user token is in the format we are expecting
+	var regexMatches = tokenRegex.FindStringSubmatch(authValue)
+	// FindStringSubmatch returns a list of values on successful matching
+	// value 0 will be the whole string passed in
+	// subsequent values will be capture group values
+	if len(regexMatches) > 0 {
+		// since we provided a capture group in the token regex
+		// and we know that the regex matched something
+		// we know that regexMatches[1] is our matched token
+		userToken = regexMatches[1]
 	}
 
 	// if authentication was successful then call the next http handler

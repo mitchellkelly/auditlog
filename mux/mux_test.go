@@ -33,7 +33,7 @@ func TestWriteJsonResponseValidEmptyValue(t *testing.T) {
 		t.Errorf(writeJsonResponseInvalidStatusError, http.StatusNoContent, writer.responseCode)
 	}
 
-	var expectedResponseText = ""
+	var expectedResponseText = "{}"
 	if string(writer.responseText) != expectedResponseText {
 		t.Errorf(writeJsonResponseInvalidBodyError, expectedResponseText, string(writer.responseText))
 	}

@@ -12,7 +12,7 @@ import (
 
 	"github.com/mitchellkelly/auditlog/api"
 	// TODO the custom http mux code (middlewares and routers) could be replaced
-	// with a more sophisticated mux package (i prefer github.com/gorilla/mux)
+	// with a more sophisticated mux package (I prefer github.com/gorilla/mux)
 	// the custom code is used here so that this service can mostly use features
 	// already available in Go
 	"github.com/mitchellkelly/auditlog/mux"
@@ -110,10 +110,12 @@ func main() {
 		tlsKey = os.Getenv("AUDIT_LOG_TLS_KEY")
 	}
 
-	// TODO change this to a more sophisticated authentication method
-	// ideally each user will have their own token so that access can be controlled more easily
-	// NOTICE: an empty token means no authentication will be done
+	// TODO using a single api token is not a very secure authentication method
+	// ideally the service would use a more dynamic authentication method like JWTs
 	var apiToken = os.Getenv("AUDIT_LOG_API_TOKEN")
+	if len(apiToken) == 0 {
+		log.Fatalf("A token that can be used to authenticate requests was not provided. Please provide on using the AUDIT_LOG_API_TOKEN environment variable")
+	}
 
 	var schemaFilePath = os.Getenv("AUDIT_LOG_EVENT_SCHEMA_FILE")
 	if len(schemaFilePath) == 0 {
