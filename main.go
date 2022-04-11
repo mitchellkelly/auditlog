@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -22,6 +21,65 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// read the json schema file and create a json schema object that can be used
+// to validate json data
+func ReadJsonSchema(schemaFilePath string) (jsonschema.Schema, error) {
+	// create a json schema object that will be used to validate event json
+	var eventJsonSchema jsonschema.Schema
+
+	// open the json schema file for reading
+	var fileReader, err = os.Open(schemaFilePath)
+	if err != nil {
+		return eventJsonSchema, fmt.Errorf("An error occured while reading the audit log event json schema file: %s", err)
+	}
+
+	// read the json schema into the schema object
+	err = json.NewDecoder(fileReader).Decode(&eventJsonSchema)
+	if err != nil {
+		return eventJsonSchema, fmt.Errorf("An error occured while parsing the audit log event json schema file: %s", err)
+	}
+
+	return eventJsonSchema, err
+}
+
+// use the database connection details to get the auditlog event collection
+func GetDbCollection(dbHost, dbPort, dbUsername, dbPassword string) (*mongo.Collection, error) {
+	var dbCredString string
+	// if either vaule is empty then we will leave the credential string empty
+	if len(dbUsername) != 0 && len(dbPassword) != 0 {
+		dbCredString = fmt.Sprintf("%s@%s", dbUsername, dbPassword)
+	}
+
+	// create an options object to use to supply options when creating the db
+	var dbConnectionString = fmt.Sprintf("mongodb://%s%s:%s", dbCredString, dbHost, dbPort)
+
+	var dbClientOptions = options.Client().ApplyURI(dbConnectionString)
+
+	// create a timed context to use when making requests to the db
+	var timedContext, timedContextCancel = context.WithTimeout(context.Background(), 10*time.Second)
+
+	// connect to db
+	var dbClient, err = mongo.Connect(timedContext, dbClientOptions)
+	if err != nil {
+		return nil, fmt.Errorf("An error occured while connecting to the database: %s", err)
+	}
+	// cancel the timed context to release any resources associated with it
+	timedContextCancel()
+
+	// create a new timed context to use to test the db connection
+	timedContext, timedContextCancel = context.WithTimeout(context.Background(), 10*time.Second)
+	// test the db connection
+	err = dbClient.Ping(timedContext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("An error occured while verifying the connection to the database: %s", err)
+	}
+
+	// connect to the 'auditlog' db 'event' collection
+	var dbCollection = dbClient.Database("auditlog").Collection("event")
+
+	return dbCollection, err
+}
+
 func main() {
 	// set the logger to log messages in UTC time
 	log.SetFlags(log.LstdFlags | log.LUTC)
@@ -29,10 +87,10 @@ func main() {
 	log.Println("Server starting")
 
 	// variables that will be set to values supplied by the user via the command line
-	var serverPort int
+	var serverPort string
 	var shouldServeTls bool
 
-	flag.IntVar(&serverPort, "p", 80, "The TCP port for the server to listen on")
+	flag.StringVar(&serverPort, "p", "", "The TCP port for the server to listen on")
 	flag.BoolVar(&shouldServeTls, "t", false, "Handle requests using TLS encryption")
 
 	// parse the command line args for flag values
@@ -41,20 +99,10 @@ func main() {
 	var tlsCert string
 	var tlsKey string
 
-	// set the default port to 443 if tls was requested and the server port was not explicitly set
 	if shouldServeTls {
-		var portExplictlySet bool
-
-		// check if the port flag was explicitly set
-		// by iterating over all of the flag values that were set
-		flag.Visit(func(f *flag.Flag) {
-			if f.Name == "p" {
-				portExplictlySet = true
-			}
-		})
-
-		if portExplictlySet == false {
-			serverPort = 443
+		// set the default port to 443 if tls was requested and the server port was not explicitly set
+		if len(serverPort) == 0 {
+			serverPort = "443"
 		}
 
 		// get the cert and key values from env variables
@@ -72,17 +120,13 @@ func main() {
 		log.Fatalf("A path to a json schema file for audit log events was not provided. Please provide on using the AUDIT_LOG_EVENT_SCHEMA_FILE environment variable")
 	}
 
-	var dbCredString string
 	// get the db username and password from env variable
 	var dbUsername = os.Getenv("AUDIT_LOG_DB_USERNAME")
 	var dbPassword = os.Getenv("AUDIT_LOG_DB_PASSWORD")
-	// if either vaule is empty then we will leave the credential string empty
-	if len(dbUsername) != 0 && len(dbPassword) != 0 {
-		dbCredString = fmt.Sprintf("%s@%s", dbUsername, dbPassword)
-	}
-	var dbHost = os.Getenv("AUDIT_LOG_DB_HOST")
-	// get the db port from env variable
+
+	// get the db host from env variable
 	// setting it to localhost if it is not provided
+	var dbHost = os.Getenv("AUDIT_LOG_DB_HOST")
 	if len(dbHost) == 0 {
 		dbHost = "localhost"
 	}
@@ -93,49 +137,18 @@ func main() {
 		dbPort = "27017"
 	}
 
-	var startupError error
-
-	// open the json schema file for reading
-	var fileReader io.Reader
-	fileReader, startupError = os.Open(schemaFilePath)
+	// use the schema file to get a json schema that can be used to validate event json
+	var eventJsonSchema, startupError = ReadJsonSchema(schemaFilePath)
 	if startupError != nil {
-		log.Fatalf("An error occured while reading the audit log event json schema file: %s", startupError)
+		log.Fatal(startupError)
 	}
 
-	// create a json schema object that will be used to validate event format
-	var eventJsonSchema jsonschema.Schema
-	// read the json schema into the schema object
-	startupError = json.NewDecoder(fileReader).Decode(&eventJsonSchema)
+	var dbCollection *mongo.Collection
+	// get the audit log event schema using the db connection details
+	dbCollection, startupError = GetDbCollection(dbHost, dbPort, dbUsername, dbPassword)
 	if startupError != nil {
-		log.Fatalf("An error occured while parsing the audit log event json schema file: %s", startupError)
+		log.Fatal(startupError)
 	}
-
-	// create an options object to use to supply options when creating the db
-	var dbConnectionString = fmt.Sprintf("mongodb://%s%s:%s", dbCredString, dbHost, dbPort)
-	var dbClientOptions = options.Client().ApplyURI(dbConnectionString)
-
-	// create a timed context to use when making requests to the db
-	var timedContext, timedContextCancel = context.WithTimeout(context.Background(), 10*time.Second)
-
-	var dbClient *mongo.Client
-	// connect to db
-	dbClient, startupError = mongo.Connect(timedContext, dbClientOptions)
-	if startupError != nil {
-		log.Fatalf("An error occured while connecting to the database: %s", startupError)
-	}
-	// cancel the timed context to release any resources associated with it
-	timedContextCancel()
-
-	// create a new timed context to use to test the db connection
-	timedContext, timedContextCancel = context.WithTimeout(context.Background(), 10*time.Second)
-	// test the db connection
-	startupError = dbClient.Ping(timedContext, nil)
-	if startupError != nil {
-		log.Fatalf("An error occured while verifying the connection to the database: %s", startupError)
-	}
-
-	// connect to the 'auditlog' db 'event' collection
-	var dbCollection = dbClient.Database("auditlog").Collection("event")
 
 	// create a new http multiplexer for handling http requests
 	var muliplexer = http.NewServeMux()
@@ -170,7 +183,7 @@ func main() {
 
 	// create an http server for serving requests using the wrapped multiplexer we created
 	var server = http.Server{
-		Addr:    fmt.Sprintf(":%d", serverPort),
+		Addr:    fmt.Sprintf(":%s", serverPort),
 		Handler: serveHandler,
 	}
 
