@@ -64,7 +64,7 @@ func EventsAddHandler(db *mongo.Collection, schema *jsonschema.Schema) http.Hand
 		if err == nil {
 			var validationError ValidationError
 			// validate the request data using the json schema
-			validationError, err = schema.ValidateBytes(context.Background(), d)
+			validationError, err = schema.ValidateBytes(request.Context(), d)
 			// if something unexpected happened while validating the json we will just return a
 			// simple 400 error
 			// if the json body is invalid then we will return a 400 and a response body
@@ -88,7 +88,7 @@ func EventsAddHandler(db *mongo.Collection, schema *jsonschema.Schema) http.Hand
 
 		if err == nil {
 			// create a timed context to use when making requests to the db
-			var timedContext, timedContextCancel = context.WithTimeout(context.Background(), 10*time.Second)
+			var timedContext, timedContextCancel = context.WithTimeout(request.Context(), 10*time.Second)
 
 			_, err = db.InsertOne(timedContext, event)
 			// close the context to release any resources associated with it
@@ -144,7 +144,7 @@ func EventsQueryHandler(db *mongo.Collection) http.Handler {
 		// TODO allow the user to sort the response by providing a sort=<field> value in the query params
 
 		// create a timed context to use when making requests to the db
-		var timedContext, timedContextCancel = context.WithTimeout(context.Background(), 10*time.Second)
+		var timedContext, timedContextCancel = context.WithTimeout(request.Context(), 10*time.Second)
 
 		// execute a find command against the db
 		// this will return a cursor that we can request values from
@@ -159,7 +159,7 @@ func EventsQueryHandler(db *mongo.Collection) http.Handler {
 		var results = make([]map[string]interface{}, 0)
 		if err == nil {
 			// curse through all of the results and add them to the results list
-			err = cursor.All(context.Background(), &results)
+			err = cursor.All(request.Context(), &results)
 		}
 
 		if err == nil {
